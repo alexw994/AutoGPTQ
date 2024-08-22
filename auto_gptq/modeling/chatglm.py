@@ -1,5 +1,5 @@
 from logging import getLogger
-from torch import LongTensor
+from torch import LongTensor, BFloat16Tensor
 
 from ._base import BaseGPTQForCausalLM, List, Dict, torch, Union
 import copy
@@ -15,7 +15,7 @@ def collate_data(blocks: List[Dict[str, List[List[int]]]], pad_token_id: int) ->
     attention_mask_blocks = [LongTensor(block["attention_mask"]) for block in blocks]
     label_blocks = [LongTensor(block["labels"]) for block in blocks]
     position_ids = [LongTensor(block["position_ids"]) for block in blocks]
-    image = [LongTensor(block["image"]) for block in blocks]
+    images = [BFloat16Tensor(block["images"]) for block in blocks]
 
     bsz = len(blocks)
     inp_max_len = max([block.size(-1) for block in input_ids_blocks])
@@ -29,7 +29,6 @@ def collate_data(blocks: List[Dict[str, List[List[int]]]], pad_token_id: int) ->
             input_ids_blocks[i] = pad_block(input_ids_blocks[i], torch.ones((block_bsz, pad_num)) * pad_token_id)
             attention_mask_blocks[i] = pad_block(attention_mask_blocks[i], torch.zeros((block_bsz, pad_num)))
             position_ids[i] = pad_block(position_ids[i], torch.zeros((block_bsz, pad_num)))
-            image[i] = pad_block(image[i], torch.zeros((block_bsz, pad_num)))
 
         label_pad_num = label_max_len - block_label_len
         if label_pad_num > 0:
@@ -40,16 +39,15 @@ def collate_data(blocks: List[Dict[str, List[List[int]]]], pad_token_id: int) ->
         "attention_mask": torch.cat(attention_mask_blocks, dim=0).long(),
         "labels": torch.cat(label_blocks, dim=0).long(),
         "position_ids": torch.cat(position_ids, dim=0).long(),
-        "image": torch.cat(image, dim=0).long(),
+        "images": torch.cat(images, dim=0).long(),
     }
 
 
 class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
-    base_modules = ["transformer.embedding.word_embeddings", "transformer.output_layer"]
-
-    layers_node = "transformer.encoder.layers"
     layer_type = "GLMBlock"
-    layer_modules = [
+    layers_block_name = "transformer.encoder.layers"
+    outside_layer_modules = ["transformer.embedding.word_embeddings", "transformer.output_layer"]
+    inside_layer_modules = [
         ["self_attention.query_key_value"],
         ["self_attention.dense"],
         ["mlp.dense_h_to_4h"],
@@ -82,10 +80,10 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
             else:
                 labels = copy.deepcopy(input_ids)
             
-            if "image" in example:
-                image = _convert_tensor_to_list(example["image"])
+            if "images" in example:
+                images = example["images"].cpu().numpy().tolist()
             else:
-                image = None
+                images = None
 
             if "position_ids" in example:
                 position_ids = _convert_tensor_to_list(example["position_ids"])
@@ -97,12 +95,12 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                     "input_ids": input_ids,
                     "attention_mask": attention_mask,
                     "labels": labels,
-                } if position_ids is None or image is None else \
+                } if position_ids is None or images is None else \
                 {
                     "input_ids": input_ids,
                     "attention_mask": attention_mask,
                     "labels": labels,
-                    "image": image,
+                    "images": images,
                     "position_ids": position_ids
                 }
             )

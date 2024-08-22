@@ -7,6 +7,7 @@ import time
 import glob
 
 from argparse import ArgumentParser
+from datasets import Dataset, DatasetDict, load_dataset, Array4D, Features
 
 import torch
 from datasets import Dataset, DatasetDict
@@ -26,8 +27,6 @@ def load_data(data_path, tokenizer, n_samples):
         else:
             is_zh = False
             labels = examples['labels_en']
-
-        caption_inp = "描述这幅图片。" if is_zh else "Describle this image."
 
         prompts = []
         input_ids = []
@@ -54,23 +53,19 @@ def load_data(data_path, tokenizer, n_samples):
             "attention_mask": attention_mask,
             "position_ids": position_ids,
             "prompt": prompts,
-            "image": images}
+            "images": images}
 
-    all_dataset = []
+    tic = time.time()    
+    rst = []
     split = 'single'
     for label in ['labels_en', 'labels_zh']:
-        d = dataset[split].select_columns(['image', label])
-        all_dataset.append(d.map(tokenize,
-                                batched=True,
-                                batch_size=4,
-                                num_proc=1,
-                                keep_in_memory=True,
-                                load_from_cache_file=False,
-                            ).select_columns(['input_ids', 'attention_mask', 'position_ids', 'image', 'prompt']))
-                                                                        
-    dataset = concatenate_datasets(all_dataset).to_list()[:n_samples]
+        d = dataset[split].select_columns(['image', label])[:n_samples]
+        n = len(d)
+        d = tokenize(d)
+        rst.extend([{k: d[k][i] for k in d.keys()} for i in range(n)])
+    print(f"slice dataset: {1000 * (time.time() - tic)} ms")  
 
-    return dataset
+    return rst
 
 
 def main():
@@ -147,7 +142,7 @@ def main():
     examples_for_quant = [
         {"input_ids": example["input_ids"], 
         "attention_mask": example["attention_mask"],
-        "image": example["image"],
+        "images": example["images"],
         "position_ids": example["position_ids"]} for example in examples
     ]
 
