@@ -1,5 +1,8 @@
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com' 
+# from vllm import LLM
+# LLM("THUDM/glm-4v-9b", trust_remote_code=True, dtype='half')
+# exit()
 
 import json
 import random
@@ -17,6 +20,20 @@ from transformers import AutoTokenizer, TextGenerationPipeline
 from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 from datasets import concatenate_datasets
 
+
+def text_generator(model, tokenizer, prompt, device):
+    inputs = tokenizer.apply_chat_template(prompt,
+                                       add_generation_prompt=True, tokenize=True, return_tensors="pt",
+                                       return_dict=True)  # chat mode
+    inputs = inputs.to(device)
+    model = model.to(device)
+    gen_kwargs = {"max_length": 2500, "do_sample": True, "top_k": 1}
+    with torch.no_grad():
+        outputs = model.generate(**inputs, **gen_kwargs)
+        outputs = outputs[:, inputs['input_ids'].shape[1]:]
+        return tokenizer.decode(outputs[0]).split('<|endoftext|>')[0]
+
+
 def load_data(data_path, tokenizer, n_samples):
     dataset = datasets.load_dataset(data_path)
 
@@ -33,11 +50,14 @@ def load_data(data_path, tokenizer, n_samples):
         position_ids = []
         images = []
         attention_mask = []
+        outputs = []
         for img, label in zip(examples['image'], labels):
             label = json.loads(label)
 
             prompt = label['conversations'][0:1]
             prompt[0]['image'] = img
+
+            output = label['conversations'][1:2]
                 
             tokenized_data = tokenizer.apply_chat_template(prompt,
                                        add_generation_prompt=True, tokenize=True, return_tensors="pt",
@@ -48,21 +68,23 @@ def load_data(data_path, tokenizer, n_samples):
             position_ids.append(tokenized_data["position_ids"][: tokenizer.model_max_length])
             images.append(tokenized_data["images"])
             prompts.append(prompt)
+            outputs.append(output)
 
         return {"input_ids": input_ids,
             "attention_mask": attention_mask,
             "position_ids": position_ids,
             "prompt": prompts,
+            "output": outputs,
             "images": images}
 
     tic = time.time()    
     rst = []
-    split = 'single'
-    for label in ['labels_en', 'labels_zh']:
-        d = dataset[split].select_columns(['image', label])[:n_samples]
-        n = len(d)
-        d = tokenize(d)
-        rst.extend([{k: d[k][i] for k in d.keys()} for i in range(n)])
+    for split in ['single', 'multi']:
+        for label in ['labels_en', 'labels_zh']:
+            d = dataset[split].select_columns(['image', label])[:n_samples]
+            d = tokenize(d)
+            n = len(d['input_ids'])
+            rst.extend([{k: d[k][i] for k in d.keys()} for i in range(n)])
     print(f"slice dataset: {1000 * (time.time() - tic)} ms")  
 
     return rst
@@ -151,8 +173,8 @@ def main():
         quantize_config=BaseQuantizeConfig(bits=args.bits, group_size=args.group_size, desc_act=args.desc_act),
         max_memory=max_memory,
         trust_remote_code=args.trust_remote_code,
+        torch_dtype=torch.bfloat16
     )
-
 
     start = time.time()
     model.quantize(
@@ -176,29 +198,20 @@ def main():
             args.quantized_model_dir,
             device="cuda:0",
             use_triton=args.use_triton,
-            max_memory=max_memory,
             inject_fused_mlp=True,
             inject_fused_attention=True,
             trust_remote_code=args.trust_remote_code,
         )
 
-    pipeline_init_kwargs = {"model": model, "tokenizer": tokenizer}
-    if not max_memory:
-        pipeline_init_kwargs["device"] = "cuda:0"
-    pipeline = TextGenerationPipeline(**pipeline_init_kwargs)
+    generator_kwargs = {"model": model, "tokenizer": tokenizer, "device":'cuda:0'}
+
     for example in random.sample(examples, k=min(4, len(examples))):
-        print(f"prompt: {example['prompt']}")
+        print(f"prompt: {example['prompt'][0]['content']}")
         print("-" * 42)
-        print(f"golden: {example['output']}")
+        print(f"golden: {example['output'][0]['content']}")
         print("-" * 42)
         start = time.time()
-        generated_text = pipeline(
-            example["prompt"],
-            return_full_text=False,
-            num_beams=1,
-            max_length=len(example["input_ids"])
-            + 128,  # use this instead of max_new_token to disable UserWarning when integrate with logging
-        )[0]["generated_text"]
+        generated_text = text_generator(prompt=example['prompt'], **generator_kwargs)
         end = time.time()
         print(f"quant: {generated_text}")
         num_new_tokens = len(tokenizer(generated_text)["input_ids"])
