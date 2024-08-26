@@ -649,14 +649,14 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
             max_memory = accelerate.utils.get_balanced_memory(
                 model,
                 max_memory=max_memory,
-                no_split_module_classes=[cls.layer_type],
+                no_split_module_classes=cls.layer_type if isinstance(cls.layer_type, list) else [cls.layer_type],
                 dtype=model_init_kwargs["torch_dtype"],
                 low_zero=False,
             )
             model_init_kwargs["device_map"] = accelerate.infer_auto_device_map(
                 model,
                 max_memory=max_memory,
-                no_split_module_classes=[cls.layer_type],
+                no_split_module_classes=cls.layer_type if isinstance(cls.layer_type, list) else [cls.layer_type],
                 dtype=model_init_kwargs["torch_dtype"],
             )
             model_init_kwargs["low_cpu_mem_usage"] = True
@@ -947,14 +947,14 @@ class BaseGPTQForCausalLM(nn.Module, PushToHubMixin):
                     max_memory = accelerate.utils.get_balanced_memory(
                         model=model,
                         max_memory=max_memory,
-                        no_split_module_classes=[cls.layer_type],
+                        no_split_module_classes=cls.layer_type if isinstance(cls.layer_type, list) else [cls.layer_type],
                         low_zero=(device_map == "balanced_low_0"),
                     )
             if not isinstance(device_map, dict):
                 device_map = accelerate.infer_auto_device_map(
                     model,
                     max_memory=max_memory,
-                    no_split_module_classes=[cls.layer_type],
+                    no_split_module_classes=cls.layer_type if isinstance(cls.layer_type, list) else [cls.layer_type],
                 )
 
             if low_cpu_mem_usage:
