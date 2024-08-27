@@ -6,7 +6,7 @@ import copy
 import logging
 import os
 from os.path import isdir, join
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Iterable
 
 import accelerate
 import torch
@@ -119,12 +119,15 @@ def collate_data(blocks: List[Dict[str, List[List[int]]]], pad_token_id: int) ->
 
 
 class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
-    # TODO: only used to caculate max_memory
-    layer_type = ["GLMBlock", "TransformerLayer"]
+    layer_type = ["GLMBlock", "TransformerLayer", "GLU"]
 
-    layers_block_names = ["transformer.encoder.layers", "transformer.vision.transformer.layers"]
-
-    outside_layer_modules = ["transformer.embedding.word_embeddings", "transformer.output_layer"]
+    layers_block_names = ["transformer.encoder.layers", 
+                            "transformer.vision.transformer.layers", 
+                            "transformer.vision.linear_proj"]
+        
+    outside_layer_modules = ["transformer.embedding.word_embeddings", "transformer.output_layer", 
+                             "transformer.vision.patch_embedding", "transformer.vision.conv"]
+    
     inside_layer_modules = [
         ["self_attention.query_key_value"],
         ["self_attention.dense"],
@@ -133,10 +136,19 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
 
         # ============================================ #
 
-        ["mlp.fc2"],
         ["attention.query_key_value"],
+        ["attention.dense"],
         ["mlp.fc1"],
+        ["mlp.fc2"],
+
+        # ============================================ #
+
+        ["linear_proj"],
+        ["dense_h_to_4h"],
+        ["gate_proj"],
+        ["dense_4h_to_h"],
     ]
+
 
     def _prepare_examples_for_quantization(
         self,
@@ -387,6 +399,8 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
 
         num_batches = len(examples)
         layers = get_module_by_name_prefix(self.model, layers_block_name)
+        if not isinstance(layers, Iterable):
+            layers = [layers]
 
         cur_layer_device = get_device(layers[0])
         data_device = cur_layer_device if cache_examples_on_gpu else CPU
@@ -563,19 +577,25 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                     remove_hook_from_module(module, recurse=True)
                     accelerate.cpu_offload_with_hook(module, CUDA_0)
 
-        examples = self._prepare_examples_for_quantization(examples, batch_size)
+        # examples = self._prepare_examples_for_quantization(examples, batch_size)
+        examples = torch.load('/root/examples.data')
 
         # DONE
         quantizers_lm, force_layer_back_to_cpu_lm = self.quantize_lm(self.layers_block_names[0],
                                                                 examples, 
                                                                 cache_examples_on_gpu)          
 
-        # # TODO
-        # quantizers_vm, force_layer_back_to_cpu_vm = self.quantize_vm(self.layers_block_names[1],
-        #                                                         examples, 
-        #                                                         cache_examples_on_gpu)  
+        # TODO
+        quantizers_vm, force_layer_back_to_cpu_vm = self.quantize_vm(self.layers_block_names[1],
+                                                                examples, 
+                                                                cache_examples_on_gpu)  
+
+        quantizers_vm_glu, force_layer_back_to_cpu_vm = self.quantize_vm(self.layers_block_names[2],
+                                                                        examples, 
+                                                                        cache_examples_on_gpu)  
 
         quantizers_lm.update(quantizers_vm)
+        quantizers_lm.update(quantizers_vm_glu)
         quantizers = quantizers_lm
 
         assert force_layer_back_to_cpu_lm == force_layer_back_to_cpu_vm

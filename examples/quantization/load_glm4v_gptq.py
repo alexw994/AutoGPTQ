@@ -16,6 +16,7 @@ import torch
 from datasets import Dataset, DatasetDict
 import datasets
 from transformers import AutoTokenizer, TextGenerationPipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 from datasets import concatenate_datasets
@@ -24,11 +25,11 @@ from datasets import concatenate_datasets
 def text_generator(model, tokenizer, prompt, device):
     inputs = tokenizer.apply_chat_template(prompt,
                                        add_generation_prompt=True, tokenize=True, return_tensors="pt",
-                                       return_dict=True)  # chat mode
+                                       return_dict=True, dtyp=torch.bfloat16)  # chat mode
     inputs = inputs.to(device)
-    model = model.to(device)
+    model = model.to(device).eval()
     inputs['images'] = inputs['images'].half()
-    
+
     gen_kwargs = {"max_length": 2500, "do_sample": True, "top_k": 1}
     with torch.no_grad():
         outputs = model.generate(**inputs, **gen_kwargs)
@@ -160,50 +161,28 @@ def main():
         use_fast=args.fast_tokenizer,
         trust_remote_code=args.trust_remote_code,
     )
-
     
     examples = load_data('alexwww94/CogVLM-SFT-311K-subset-gptq', tokenizer, args.num_samples)
-    examples_for_quant = [
-        {"input_ids": example["input_ids"], 
-        "attention_mask": example["attention_mask"],
-        "images": example["images"],
-        "position_ids": example["position_ids"]} for example in examples
-    ]
 
-    model = AutoGPTQForCausalLM.from_pretrained(
-        args.pretrained_model_dir,
-        quantize_config=BaseQuantizeConfig(bits=args.bits, group_size=args.group_size, desc_act=args.desc_act),
-        max_memory=max_memory,
-        trust_remote_code=args.trust_remote_code,
-        torch_dtype=torch.bfloat16
-    )
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    start = time.time()
-    model.quantize(
-        examples_for_quant,
-        batch_size=args.quant_batch_size,
-        use_triton=args.use_triton,
-        autotune_warmup_after_quantized=args.use_triton,
-    )
-    end = time.time()
-    print(f"quantization took: {end - start: .4f}s")
-
-    if not args.quantized_model_dir:
-        args.quantized_model_dir = args.pretrained_model_dir
-
-    if args.save_and_reload:
-        model.save_quantized(args.quantized_model_dir)
-        del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        model = AutoGPTQForCausalLM.from_quantized(
+    model = AutoGPTQForCausalLM.from_quantized(
             args.quantized_model_dir,
             device="cuda:0",
             use_triton=args.use_triton,
-            inject_fused_mlp=True,
-            inject_fused_attention=True,
             trust_remote_code=args.trust_remote_code,
+            torch_dtype=torch.float16,
+            use_cache=True
         )
+
+    # model = AutoModelForCausalLM.from_pretrained(
+    #     args.pretrained_model_dir,
+    #     torch_dtype=torch.bfloat16,
+    #     low_cpu_mem_usage=True,
+    #     trust_remote_code=args.trust_remote_code,
+    # ).to("cuda:0").eval()
+
 
     generator_kwargs = {"model": model, "tokenizer": tokenizer, "device":'cuda:0'}
 
