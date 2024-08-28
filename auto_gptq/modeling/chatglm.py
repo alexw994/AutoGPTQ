@@ -261,6 +261,8 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
 
         num_batches = len(examples)
         layers = get_module_by_name_prefix(self.model, layers_block_name)
+        if not isinstance(layers, Iterable):
+            layers = [layers]
 
         cur_layer_device = get_device(layers[0])
         data_device = cur_layer_device if cache_examples_on_gpu else CPU
@@ -423,7 +425,6 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                     remove_hook_from_module(module, recurse=True)
                     accelerate.cpu_offload_with_hook(module, CUDA_0)
 
-        # examples = self._prepare_examples_for_quantization(examples, batch_size)
         examples = torch.load('/root/examples.data')
 
         # DONE
