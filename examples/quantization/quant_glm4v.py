@@ -183,7 +183,7 @@ def main():
         examples_for_quant,
         batch_size=args.quant_batch_size,
         use_triton=args.use_triton,
-        autotune_warmup_after_quantized=args.use_triton,
+        autotune_warmup_after_quantized=args.use_triton
     )
     end = time.time()
     print(f"quantization took: {end - start: .4f}s")

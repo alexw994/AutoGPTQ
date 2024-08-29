@@ -145,6 +145,11 @@ def main():
         action="store_true",
         help="whether to trust remote code when loading model",
     )
+    parser.add_argument(
+        "--quant",
+        action="store_true",
+    )
+
     args = parser.parse_args()
 
     max_memory = {}
@@ -166,8 +171,9 @@ def main():
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
-    model = AutoGPTQForCausalLM.from_quantized(
+    
+    if args.quant:
+        model = AutoGPTQForCausalLM.from_quantized(
             args.quantized_model_dir,
             device="cuda:0",
             use_triton=args.use_triton,
@@ -175,13 +181,13 @@ def main():
             torch_dtype=torch.float16,
             use_cache=True
         )
-
-    # model = AutoModelForCausalLM.from_pretrained(
-    #     args.pretrained_model_dir,
-    #     torch_dtype=torch.bfloat16,
-    #     low_cpu_mem_usage=True,
-    #     trust_remote_code=args.trust_remote_code,
-    # ).to("cuda:0").eval()
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+             args.pretrained_model_dir,
+             torch_dtype=torch.bfloat16,
+             low_cpu_mem_usage=True,
+             trust_remote_code=args.trust_remote_code,
+        ).to("cuda:0").eval()
 
 
     generator_kwargs = {"model": model, "tokenizer": tokenizer, "device":'cuda:0'}

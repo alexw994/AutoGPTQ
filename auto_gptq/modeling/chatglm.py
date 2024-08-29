@@ -161,8 +161,7 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                             "transformer.vision.transformer.layers", 
                             "transformer.vision.linear_proj"]
         
-    outside_layer_modules = ["transformer.embedding.word_embeddings", "transformer.output_layer", 
-                             "transformer.vision.patch_embedding", "transformer.vision.conv"]
+    outside_layer_modules = ["transformer.output_layer"]
     
     inside_layer_modules = [
         ["self_attention.query_key_value", "self_attention.dense", "mlp.dense_h_to_4h", "mlp.dense_4h_to_h"],
@@ -248,7 +247,7 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
         cache_examples_on_gpu: bool = True,
         after_layer_quantized = None
     ):
-        
+        is_only_one_layer = False
         layer_inputs = []
         attention_masks = []
         position_ids = []
@@ -262,6 +261,8 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
         num_batches = len(examples)
         layers = get_module_by_name_prefix(self.model, layers_block_name)
         if not isinstance(layers, Iterable):
+            # only one layer
+            is_only_one_layer = True
             layers = [layers]
 
         cur_layer_device = get_device(layers[0])
@@ -376,7 +377,8 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                         actorder=self.quantize_config.desc_act,
                         static_groups=self.quantize_config.static_groups,
                     )
-                    quantizers[f"{layers_block_name}.{i}.{name}"] = (
+                    quantizer_key = f"{layers_block_name}.{name}" if is_only_one_layer else f"{layers_block_name}.{i}.{name}"
+                    quantizers[quantizer_key] = (
                         gptq[name].quantizer.to(CPU if force_layer_back_to_cpu else cur_layer_device),
                         move_to_device(scale, CPU if force_layer_back_to_cpu else cur_layer_device),
                         move_to_device(zero, CPU if force_layer_back_to_cpu else cur_layer_device),
@@ -425,15 +427,13 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
                     remove_hook_from_module(module, recurse=True)
                     accelerate.cpu_offload_with_hook(module, CUDA_0)
 
-        examples = torch.load('/root/examples.data')
-
-        # DONE
+        examples = self._prepare_examples_for_quantization(examples, batch_size)
+        
         quantizers_lm, force_layer_back_to_cpu_lm = self.quantize_module(self.layers_block_names[0],
                                                                 examples, 
                                                                 cache_examples_on_gpu,
                                                                 after_layer_quantized=after_lm_layer_quantized)          
 
-        # TODO
         quantizers_vm, force_layer_back_to_cpu_vm = self.quantize_module(self.layers_block_names[1],
                                                                 examples, 
                                                                 cache_examples_on_gpu,
