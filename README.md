@@ -15,8 +15,10 @@
     </p>
 </h4>
 
-## News or Update
+## Fork Contribution
+Added the quantization script for glm-4v. See [examples/quantization/quant_glm4v.py](https://github.com/alexw994/AutoGPTQ/blob/main/examples/quantization/quant_glm4v.py)
 
+## News or Update
 - 2024-02-15 - (News) - AutoGPTQ 0.7.0 is released, with [Marlin](https://github.com/IST-DASLab/marlin) int4*fp16 matrix multiplication kernel support, with the argument `use_marlin=True` when loading models.
 - 2023-08-23 - (News) - 🤗 Transformers, optimum and peft have integrated `auto-gptq`, so now running and training GPTQ models can be more available to everyone! See [this blog](https://huggingface.co/blog/gptq-integration) and it's resources for more details!
 
