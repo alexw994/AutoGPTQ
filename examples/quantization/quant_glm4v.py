@@ -172,10 +172,10 @@ def main():
 
     model = AutoGPTQForCausalLM.from_pretrained(
         args.pretrained_model_dir,
-        quantize_config=BaseQuantizeConfig(bits=args.bits, group_size=args.group_size, desc_act=args.desc_act),
+        quantize_config=BaseQuantizeConfig(bits=args.bits, group_size=args.group_size, 
+                                           desc_act=args.desc_act, model_file_base_name='model.safetensors'),
         max_memory=max_memory,
-        trust_remote_code=args.trust_remote_code,
-        torch_dtype=torch.bfloat16
+        trust_remote_code=args.trust_remote_code
     )
 
     start = time.time()
