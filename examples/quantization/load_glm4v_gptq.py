@@ -11,6 +11,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from auto_gptq import AutoGPTQForCausalLM
 
 from auto_gptq.modeling._base import BaseGPTQForCausalLM
+from auto_gptq.modeling._const import SUPPORTED_MODELS
+
 from auto_gptq.modeling.auto import GPTQ_CAUSAL_LM_MODEL_MAP
 
 class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
@@ -29,6 +31,7 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
     ]
 
 GPTQ_CAUSAL_LM_MODEL_MAP['chatglm'] = ChatGLMGPTQForCausalLM
+SUPPORTED_MODELS.append('chatglm')
 
 device = 'cuda:0'
 quantized_model_dir = 'alexwww94/glm-4v-9b-gptq-4bit'
