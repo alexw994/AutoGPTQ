@@ -31,7 +31,7 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
     ]
 
 GPTQ_CAUSAL_LM_MODEL_MAP['chatglm'] = ChatGLMGPTQForCausalLM
-SUPPORTED_MODELS.append('chatglm')
+SUPPORTED_MODELS = SUPPORTED_MODELS.append('chatglm')
 
 device = 'cuda:0'
 quantized_model_dir = 'alexwww94/glm-4v-9b-gptq-4bit'
