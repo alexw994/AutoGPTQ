@@ -165,13 +165,7 @@ class ChatGLMGPTQForCausalLM(BaseGPTQForCausalLM):
     
     inside_layer_modules = [
         ["self_attention.query_key_value", "self_attention.dense", "mlp.dense_h_to_4h", "mlp.dense_4h_to_h"],
-
-        # ============================================ #
-
         ["attention.query_key_value", "attention.dense", "mlp.fc1", "mlp.fc2"],
-
-        # ============================================ #
-
         ["linear_proj", "dense_h_to_4h", "gate_proj", "dense_4h_to_h"],
     ]
 
