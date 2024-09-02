@@ -1,8 +1,6 @@
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com' 
-# from vllm import LLM
-# LLM("THUDM/glm-4v-9b", trust_remote_code=True, dtype='half')
-# exit()
+
 
 import json
 import random
@@ -19,6 +17,10 @@ from transformers import AutoTokenizer, TextGenerationPipeline
 
 from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 from datasets import concatenate_datasets
+from torch.utils.data import Dataset as TorchDataset
+from torch.utils.data import DataLoader
+from typing import Any
+
 
 
 def text_generator(model, tokenizer, prompt, device):
@@ -36,41 +38,36 @@ def text_generator(model, tokenizer, prompt, device):
         return tokenizer.decode(outputs[0]).split('<|endoftext|>')[0]
 
 
-def load_data(data_path, tokenizer, n_samples):
-    dataset = datasets.load_dataset(data_path)
+class QuantDataset(TorchDataset):
+    def __init__(self, data_path, tokenizer, n_samples) -> None:
+        super().__init__()
+        ds = datasets.load_dataset(data_path)
+        ds = concatenate_datasets([ds['single'], ds['multi']])
+        self.ds = concatenate_datasets([ds.select_columns(['image', 'labels_en']).rename_column('labels_en', 'labels'),
+                                        ds.select_columns(['image', 'labels_zh']).rename_column('labels_zh', 'labels')])
 
-    def tokenize(examples):
-        if 'labels_zh' in examples:
-            is_zh = True
-            labels = examples['labels_zh']
-        else:
-            is_zh = False
-            labels = examples['labels_en']
+        self.tokenizer = tokenizer
+        self.n_samples = n_samples
+    
 
-        prompts = []
-        input_ids = []
-        position_ids = []
-        images = []
-        attention_mask = []
-        outputs = []
-        for img, label in zip(examples['image'], labels):
-            label = json.loads(label)
+    def __getitem__(self, index) -> Any:
+        example = self.ds[index]
 
-            prompt = label['conversations'][0:1]
-            prompt[0]['image'] = img
+        img = example['image']
+        label = json.loads(example['labels'])
+        prompt = label['conversations'][0]
+        prompt['image'] = img
 
-            output = label['conversations'][1:2]
-                
-            tokenized_data = tokenizer.apply_chat_template(prompt,
-                                       add_generation_prompt=True, tokenize=True, return_tensors="pt",
-                                       return_dict=True)
+        tokenized_data = self.tokenizer.apply_chat_template([prompt],
+                                    add_generation_prompt=True, tokenize=True, return_tensors="pt",
+                                    return_dict=True)
 
-            input_ids.append(tokenized_data["input_ids"][: tokenizer.model_max_length])
-            attention_mask.append(tokenized_data["attention_mask"][: tokenizer.model_max_length])
-            position_ids.append(tokenized_data["position_ids"][: tokenizer.model_max_length])
-            images.append(tokenized_data["images"])
-            prompts.append(prompt)
-            outputs.append(output)
+        input_ids = tokenized_data["input_ids"][: self.tokenizer.model_max_length]
+        attention_mask = tokenized_data["attention_mask"][: self.tokenizer.model_max_length]
+        position_ids = tokenized_data["position_ids"][: self.tokenizer.model_max_length]
+        images = tokenized_data["images"]
+        prompts = label['conversations'][0]
+        outputs = label['conversations'][1]
 
         return {"input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -79,17 +76,9 @@ def load_data(data_path, tokenizer, n_samples):
             "output": outputs,
             "images": images}
 
-    tic = time.time()    
-    rst = []
-    for split in ['single', 'multi']:
-        for label in ['labels_en', 'labels_zh']:
-            d = dataset[split].select_columns(['image', label])[:n_samples]
-            d = tokenize(d)
-            n = len(d['input_ids'])
-            rst.extend([{k: d[k][i] for k in d.keys()} for i in range(n)])
-    print(f"slice dataset: {1000 * (time.time() - tic)} ms")  
 
-    return rst
+    def __len__(self):
+        return min(self.n_samples, len(self.ds))
 
 
 def main():
@@ -161,14 +150,8 @@ def main():
         trust_remote_code=args.trust_remote_code,
     )
 
-    
-    examples = load_data('alexwww94/CogVLM-SFT-311K-subset-gptq', tokenizer, args.num_samples)
-    examples_for_quant = [
-        {"input_ids": example["input_ids"], 
-        "attention_mask": example["attention_mask"],
-        "images": example["images"],
-        "position_ids": example["position_ids"]} for example in examples
-    ]
+
+    examples = QuantDataset('alexwww94/CogVLM-SFT-311K-subset-gptq', tokenizer, args.num_samples)
 
     model = AutoGPTQForCausalLM.from_pretrained(
         args.pretrained_model_dir,
@@ -180,7 +163,7 @@ def main():
 
     start = time.time()
     model.quantize(
-        examples_for_quant,
+        examples,
         batch_size=args.quant_batch_size,
         use_triton=args.use_triton,
         autotune_warmup_after_quantized=args.use_triton
